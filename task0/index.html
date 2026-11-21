@@ -91,6 +91,16 @@
   <div class="row"><button class="btn hidden" id="b-next">Next</button></div>
 </section>
 
+<!-- 3b. 주의력 확인 퀴즈 -->
+<section id="s-check" class="card hidden">
+  <div class="count" id="check-count"></div>
+  <h1 style="text-align:center">Quick check</h1>
+  <p class="center" id="check-q" style="font-size:1.3rem"></p>
+  <p class="center" style="color:var(--muted)">Type your answer as a number in the box below.</p>
+  <div class="center"><input type="text" id="check-in" inputmode="numeric" autocomplete="off" style="width:160px;text-align:center;font-size:1.2rem"></div>
+  <div class="row"><button class="btn" id="b-check" disabled>Continue</button></div>
+</section>
+
 <!-- 4. 본 과제 안내 -->
 <section id="s-main" class="card hidden">
   <h1>Practice complete</h1>
@@ -129,11 +139,18 @@ const PRACTICE = [
   { id:"p5", word:"examination", syl:["ex","am","i","na","tion"],      gold:4 },
 ];
 
+// 주의력 확인 퀴즈: 본 과제 중 해당 번째 단어를 마친 뒤에 나온다
+const CHECKS = [
+  { id:"ac1", after:12, q:"What is (3 × 6 + 2) ÷ 4?", answer:5 },
+  { id:"ac2", after:25, q:"What is (9 + 6) ÷ 3 + 7?", answer:12 },
+  { id:"ac3", after:38, q:"What is (8 + 4) ÷ 3 × 5?", answer:20 },
+];
+
 // ===== 상태 =====
 const $ = id => document.getElementById(id);
 const show = id => { document.querySelectorAll("section").forEach(s => s.classList.add("hidden")); $(id).classList.remove("hidden"); window.scrollTo(0,0); };
 let phase = "practice", queue = [], idx = 0, t0 = 0;
-const results = [], practiceLog = [];
+const results = [], practiceLog = [], checkLog = [];
 const params = new URLSearchParams(location.search);
 const meta = { started_at: new Date().toISOString(), user_agent: navigator.userAgent,
   prolific_pid: params.get("PROLIFIC_PID") || "", study_id: params.get("STUDY_ID") || "", session_id: params.get("SESSION_ID") || "" };
@@ -196,11 +213,30 @@ function choose(choice, btn) {
 }
 
 function next() {
+  if (phase === "main") {
+    const c = CHECKS.find(c => c.after === idx + 1 && !checkLog.some(l => l.id === c.id));
+    if (c) { showCheck(c); return; }
+  }
   idx++;
   if (idx < queue.length) { renderTrial(); return; }
   if (phase === "practice") { show("s-main"); } else { finish(); }
 }
 $("b-next").onclick = next;
+
+let curCheck = null, tc = 0;
+function showCheck(c) {
+  curCheck = c; $("check-q").textContent = c.q; $("check-in").value = ""; $("b-check").disabled = true;
+  $("check-count").textContent = (idx + 1) + " / " + queue.length;
+  show("s-check"); $("check-in").focus(); tc = performance.now();
+}
+$("check-in").addEventListener("input", () => { $("b-check").disabled = !$("check-in").value.trim(); });
+$("check-in").addEventListener("keydown", e => { if (e.key === "Enter" && !$("b-check").disabled) $("b-check").click(); });
+$("b-check").onclick = () => {
+  const resp = $("check-in").value.trim();
+  checkLog.push({ id: curCheck.id, after_item: curCheck.after, question: curCheck.q, response: resp,
+                  correct: Number(resp) === curCheck.answer, rt_ms: Math.round(performance.now() - tc) });
+  show("s-trial"); next();
+};
 
 // ===== 종료와 저장 =====
 function toCSV() {
@@ -221,7 +257,8 @@ async function finish() {
   $("bar").style.width = "100%";
   meta.finished_at = new Date().toISOString();
   show("s-end");
-  const payload = { task: "task0_text_stress", ...meta, practice: JSON.stringify(practiceLog), responses: JSON.stringify(results), responses_csv: toCSV() };
+  const payload = { task: "task0_text_stress", ...meta, practice: JSON.stringify(practiceLog), attention_checks: JSON.stringify(checkLog),
+    attention_correct: checkLog.filter(c => c.correct).length + "/" + checkLog.length, responses: JSON.stringify(results), responses_csv: toCSV() };
   if (!FORMSPREE_URL) { $("end-msg").textContent = "Please download your responses and send the file to the researcher."; $("b-dl").classList.remove("hidden"); return; }
   try {
     const res = await fetch(FORMSPREE_URL, { method: "POST", headers: { "Content-Type": "application/json", "Accept": "application/json" }, body: JSON.stringify(payload) });
